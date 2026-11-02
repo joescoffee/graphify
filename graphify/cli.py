@@ -1012,9 +1012,11 @@ def _nudge_allowed(payload: dict) -> bool:
         # Hashed so long ids cannot truncate two agents into one key.
         key += "-" + hashlib.sha256(agent.encode("utf-8")).hexdigest()[:16]
     try:
-        d = out_path("cache", "hook_sessions")
-        d.mkdir(parents=True, exist_ok=True)
+        d = _hook_sessions_dir()
         marker = d / f"{key}.nudges"
+        if os.path.islink(marker):
+            # Never write through a planted symlink (write_text_atomic follows links).
+            raise OSError(f"refusing symlinked hook marker: {marker}")
         try:
             count = int(marker.read_text(encoding="utf-8").strip() or "0")
         except (OSError, ValueError):
@@ -1031,13 +1033,56 @@ def _nudge_allowed(payload: dict) -> bool:
         return not stamp
 
 
+# Suffixes of the per-session marker files this module writes into
+# hook_sessions/ (`_nudge_allowed` and `_mark_session_denied`). GC only ever
+# deletes these, so a misdirected directory can't cost the user other files.
+_HOOK_MARKER_SUFFIXES = (".nudges", ".denied")
+
+
+def _hook_sessions_dir() -> "Path":
+    """Create and return ``<out>/cache/hook_sessions``, refusing symlinks.
+
+    Security: hooks run on every tool call, so a ``cache`` or ``hook_sessions``
+    symlink planted in a cloned repo's committed ``graphify-out/`` would
+    otherwise redirect marker writes and the 24h GC (an ``unlink`` loop) to an
+    arbitrary directory. Raises OSError if either component is a symlink or
+    the directory resolves outside the configured output dir; callers already
+    treat OSError as fail-open. The output dir itself may be a symlink
+    (documented shared-output/worktree setups), so containment is checked
+    against its resolved path."""
+    from graphify.paths import out_path
+    base = os.path.realpath(str(out_path()))
+    cache = out_path("cache")
+    d = out_path("cache", "hook_sessions")
+    for p in (cache, d):
+        if os.path.islink(p):
+            raise OSError(f"refusing symlinked hook directory: {p}")
+    d.mkdir(parents=True, exist_ok=True)
+    for p in (cache, d):  # re-check: mkdir follows a link created in between
+        if os.path.islink(p):
+            raise OSError(f"refusing symlinked hook directory: {p}")
+    real = os.path.realpath(str(d))
+    if os.path.commonpath([base, real]) != base:
+        raise OSError(f"hook directory resolves outside the output dir: {real}")
+    return d
+
+
 def _gc_hook_session_markers(d: "Path") -> None:
-    """Best-effort removal of per-session hook markers older than 24h."""
+    """Best-effort removal of per-session hook markers older than 24h.
+
+    Only regular, non-symlink files named ``*.nudges`` / ``*.denied`` are
+    removed; anything else in the directory is left alone."""
     try:
+        if os.path.islink(d):
+            return
         cutoff = time.time() - 86400
         for entry in os.scandir(d):
             try:
-                if entry.stat().st_mtime < cutoff:
+                if not entry.name.endswith(_HOOK_MARKER_SUFFIXES):
+                    continue
+                if entry.is_symlink() or not entry.is_file(follow_symlinks=False):
+                    continue
+                if entry.stat(follow_symlinks=False).st_mtime < cutoff:
                     os.unlink(entry.path)
             except OSError:
                 pass
@@ -1055,9 +1100,11 @@ def _mark_session_denied(session_id: str) -> bool:
     if not sid:
         return False
     try:
-        d = out_path("cache", "hook_sessions")
-        d.mkdir(parents=True, exist_ok=True)
-        fd = os.open(str(d / f"{sid}.denied"), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+        d = _hook_sessions_dir()
+        # O_EXCL already fails on an existing symlink; O_NOFOLLOW (POSIX) makes
+        # the no-follow intent explicit.
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(str(d / f"{sid}.denied"), flags, 0o644)
         os.close(fd)
         _gc_hook_session_markers(d)
         return True

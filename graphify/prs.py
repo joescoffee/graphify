@@ -711,11 +711,17 @@ def triage_with_opus(prs: list[PRInfo], base: str) -> None:
             _claude = "claude"
             if _platform.system() == "Windows":
                 _claude = _shutil.which("claude.cmd") or _shutil.which("claude") or "claude"
-            proc = _sp.run(
-                [_claude, "-p", "--no-session-persistence"],
-                input=prompt, capture_output=True, text=True,
-                encoding="utf-8", errors="replace", timeout=120,
-            )
+            # Security: the prompt embeds PR titles/bodies (untrusted). Run with
+            # no tools, no MCP, and an empty cwd so the repo's CLAUDE.md,
+            # .claude/ settings and hooks are not loaded.
+            from graphify.llm import _claude_cli_isolation_args, _isolated_cwd
+            with _isolated_cwd() as _cwd:
+                proc = _sp.run(
+                    [_claude, "-p", "--no-session-persistence", *_claude_cli_isolation_args()],
+                    input=prompt, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=120,
+                    cwd=_cwd,
+                )
             if proc.returncode != 0:
                 print(red(f"  claude -p failed: {proc.stderr.strip()[:300]}"), file=sys.stderr)
             else:

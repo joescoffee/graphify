@@ -37,17 +37,16 @@ function Find-GraphifyPython {
     return $null
 }
 
-# Try to find the right Python (uv → pipx → active env)
+# Try to find the right Python (uv → pipx → active env); never installs anything
 $GRAPHIFY_PYTHON = Find-GraphifyPython
 
-# Not found — install then re-detect
+# Not found — do NOT install automatically (security: no unattended installs or
+# upgrades from PyPI). Stop and let the user install a pinned version.
 if (-not $GRAPHIFY_PYTHON) {
-    if (Get-Command uv -ErrorAction SilentlyContinue) {
-        uv tool install --upgrade graphifyy -q 2>&1 | Select-Object -Last 3
-    } else {
-        pip install graphifyy -q 2>&1 | Select-Object -Last 3
-    }
-    $GRAPHIFY_PYTHON = Find-GraphifyPython
+    Write-Host "graphify is not installed. Nothing was installed automatically."
+    Write-Host "Install a pinned version yourself, then re-run /graphify, e.g.:"
+    Write-Host "    uv tool install graphifyy==0.9.100    # or: pipx install graphifyy==0.9.100"
+    exit 1
 }
 
 # Save interpreter path — all subsequent steps read this.
@@ -66,8 +65,11 @@ $InputPathRaw = @'
 INPUT_PATH
 '@
 [System.IO.File]::WriteAllText((Join-Path $PWD 'graphify-out\.graphify_root'), (Resolve-Path $InputPathRaw.Trim()).Path, $Utf8NoBom)
+# Later Python blocks read the raw scan path from this file instead of having it
+# substituted into their source.
+[System.IO.File]::WriteAllText((Join-Path $PWD 'graphify-out\.graphify_input'), $InputPathRaw.Trim(), $Utf8NoBom)
 ```
 
-If the import succeeds, print nothing and move straight to Step 2.
+If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==0.9.100`) and do not install or upgrade graphify yourself.
 
 **In every subsequent block, run Python through the saved interpreter — `& (Get-Content graphify-out\.graphify_python)` in place of a bare `python3` — so every step uses the interpreter that actually has graphify.**

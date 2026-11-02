@@ -450,6 +450,27 @@ def _no_window_kwargs() -> dict:
     return {}
 
 
+def _claude_cli_isolation_args(tools: str = "") -> list[str]:
+    """Flags that keep a headless `claude -p` call from acting as a coding agent.
+
+    The prompt carries untrusted file contents, so a prompt injection in a
+    scanned file must not be able to run tools. `--tools ""` disables every
+    built-in tool (pass e.g. "Read" when a call genuinely needs one), and
+    `--strict-mcp-config` with no `--mcp-config` loads no MCP servers. Callers
+    also run the CLI with `cwd` set to a fresh empty directory (see
+    `_isolated_cwd`) so the project's CLAUDE.md, .claude/ settings, hooks and
+    .mcp.json are not picked up."""
+    return ["--tools", tools, "--strict-mcp-config"]
+
+
+def _isolated_cwd():
+    """A fresh, empty working directory for a `claude -p` subprocess.
+
+    Returns a TemporaryDirectory context manager; use its path as `cwd=`."""
+    import tempfile
+    return tempfile.TemporaryDirectory(prefix="graphify-claude-cli-")
+
+
 def _resolve_api_timeout(default: float = 600.0) -> float:
     """Honour GRAPHIFY_API_TIMEOUT env var override, else use default (seconds)."""
     raw = os.environ.get("GRAPHIFY_API_TIMEOUT", "").strip()
@@ -1946,10 +1967,15 @@ def _call_claude_cli(user_message: str, max_tokens: int = 8192, *, deep_mode: bo
         + "preamble, no markdown fences.\n\n"
         + user_message
     )
+    # Security: no tools unless images must be opened. With images, only the
+    # Read tool is enabled, and only the image directories are allowlisted via
+    # --add-dir (the cwd is an empty temp dir, so nothing else is readable by
+    # default). No Bash/Write/Edit/WebFetch and no MCP in either case.
     cli_args = [
         claude_cmd, "-p",
         "--output-format", "json",
         "--no-session-persistence",
+        *_claude_cli_isolation_args("Read" if images else ""),
         *add_dir_args,
     ]
     # claude-cli defaults to Opus, which is overkill for the structured-JSON
@@ -1970,17 +1996,19 @@ def _call_claude_cli(user_message: str, max_tokens: int = 8192, *, deep_mode: bo
     # CLIs that predate the flag.
     if _claude_cli_supports_json_schema(claude_cmd):
         cli_args.extend(["--json-schema", _EXTRACTION_JSON_SCHEMA])
-    proc = subprocess.run(
-        cli_args,
-        input=combined_message,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",  # Force UTF-8 — prevents UnicodeEncodeError on Windows cp1252
-        errors="replace",  # Tolerate non-UTF-8 bytes (e.g. GBK/cp936 from claude.cmd on Chinese Windows)
-        timeout=_resolve_api_timeout(),
-        check=False,
-        **_no_window_kwargs(),
-    )
+    with _isolated_cwd() as _cwd:
+        proc = subprocess.run(
+            cli_args,
+            input=combined_message,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",  # Force UTF-8 — prevents UnicodeEncodeError on Windows cp1252
+            errors="replace",  # Tolerate non-UTF-8 bytes (e.g. GBK/cp936 from claude.cmd on Chinese Windows)
+            timeout=_resolve_api_timeout(),
+            check=False,
+            cwd=_cwd,  # empty dir: no project CLAUDE.md/.claude settings/hooks/MCP
+            **_no_window_kwargs(),
+        )
     cli_error = _claude_cli_error(proc.stdout)
     if proc.returncode != 0:
         detail = proc.stderr.strip() or cli_error or "(no stderr, no error envelope)"
@@ -3193,24 +3221,29 @@ def _call_llm(
                 raise RuntimeError("Claude Code CLI not found on $PATH")
         elif shutil.which("claude") is None:
             raise RuntimeError("Claude Code CLI not found on $PATH")
-        cli_args = [claude_cmd, "-p", "--output-format", "json", "--no-session-persistence"]
+        # Security: text-only call — no tools, no MCP, empty cwd (see
+        # _claude_cli_isolation_args).
+        cli_args = [claude_cmd, "-p", "--output-format", "json", "--no-session-persistence",
+                    *_claude_cli_isolation_args()]
         cli_model = (
             mdl if model is not None
             else os.environ.get("GRAPHIFY_CLAUDE_CLI_MODEL", "").strip()
         )
         if cli_model:
             cli_args.extend(["--model", cli_model])
-        proc = subprocess.run(
-            cli_args,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",  # Force UTF-8 — prevents UnicodeEncodeError on Windows cp1252
-            errors="replace",  # Tolerate non-UTF-8 bytes (e.g. GBK/cp936 from claude.cmd on Chinese Windows)
-            timeout=_resolve_api_timeout(),
-            check=False,
-            **_no_window_kwargs(),
-        )
+        with _isolated_cwd() as _cwd:
+            proc = subprocess.run(
+                cli_args,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",  # Force UTF-8 — prevents UnicodeEncodeError on Windows cp1252
+                errors="replace",  # Tolerate non-UTF-8 bytes (e.g. GBK/cp936 from claude.cmd on Chinese Windows)
+                timeout=_resolve_api_timeout(),
+                check=False,
+                cwd=_cwd,  # empty dir: no project CLAUDE.md/.claude settings/hooks/MCP
+                **_no_window_kwargs(),
+            )
         cli_error = _claude_cli_error(proc.stdout)
         if proc.returncode != 0:
             detail = proc.stderr.strip() or cli_error or "(no stderr, no error envelope)"

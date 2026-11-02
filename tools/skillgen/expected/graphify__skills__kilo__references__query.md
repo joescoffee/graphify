@@ -62,11 +62,15 @@ If the list is empty, say so plainly and stop — do not proceed to traversal.
 
 Build the **expanded query string** by joining the selected tokens with spaces. Use this string as `QUESTION` below — NOT the original user question. (The original question is preserved only for `save-result` at the end.)
 
-Prefer the CLI when it is installed:
+Prefer the CLI when it is installed. Write the query string to a file through a **quoted** heredoc and pass it from there — never type it inside quotes on the command line, where `$(...)`, backticks or a stray quote in the text would run as shell code:
 ```bash
-graphify query "QUESTION"
-# or: graphify query "QUESTION" --dfs --budget 3000
+cat > graphify-out/.graphify_question.txt <<'GRAPHIFY_QUESTION_EOF'
+QUESTION
+GRAPHIFY_QUESTION_EOF
+graphify query "$(cat graphify-out/.graphify_question.txt)"
+# or: graphify query "$(cat graphify-out/.graphify_question.txt)" --dfs --budget 3000
 ```
+The quoted delimiter (`<<'GRAPHIFY_QUESTION_EOF'`) keeps the body literal. If the text itself contains a line equal to the delimiter, pick a different delimiter. The same rule applies to every heredoc below.
 
 If the CLI is unavailable, load `graphify-out/graph.json` and run the traversal inline:
 
@@ -85,7 +89,7 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
 G = json_graph.node_link_graph(data, edges='links')
 
-question = 'QUESTION'
+question = sys.stdin.read().strip()  # from the quoted heredoc after this block; never inline the text here
 mode = 'MODE'  # 'bfs' or 'dfs'
 terms = [t.lower() for t in question.split() if len(t) >= 3]  # match the vocab threshold; keeps api/jwt/ios (#1392)
 
@@ -166,20 +170,30 @@ output = '\n'.join(lines)
 if len(output) > char_budget:
     output = output[:char_budget] + f'\n... (truncated at ~{token_budget} token budget - use --budget N for more)'
 print(output)
-"
+" <<'GRAPHIFY_QUESTION_EOF'
+QUESTION
+GRAPHIFY_QUESTION_EOF
 ```
 
-Replace `QUESTION` with the **expanded** query string, `MODE` with `bfs` or `dfs`, and `BUDGET` with the token budget (default `2000`, or whatever `--budget N` specifies). Then answer based on the subgraph output above, using only what the graph contains.
+Replace `QUESTION` in the heredoc body (never in the code) with the **expanded** query string, `MODE` with `bfs` or `dfs`, and `BUDGET` with the token budget (default `2000`, or whatever `--budget N` specifies). Then answer based on the subgraph output above, using only what the graph contains.
 
 After writing the answer, save it back into the graph so it improves future queries. Include the expanded tokens inside the `--answer` text (e.g. `"Expanded from original query via vocab: [tokens]. Then traversed..."`) so the next `--update` extracts the expansion history as a graph node:
 
 ```bash
-$(cat graphify-out/.graphify_python) -m graphify save-result --question "ORIGINAL_QUESTION" --answer "ANSWER" --type query --nodes NODE1 NODE2
+cat > graphify-out/.graphify_question.txt <<'GRAPHIFY_QUESTION_EOF'
+ORIGINAL_QUESTION
+GRAPHIFY_QUESTION_EOF
+cat > graphify-out/.graphify_answer.txt <<'GRAPHIFY_ANSWER_EOF'
+ANSWER
+GRAPHIFY_ANSWER_EOF
+$(cat graphify-out/.graphify_python) -m graphify save-result --question="$(cat graphify-out/.graphify_question.txt)" --answer-file graphify-out/.graphify_answer.txt --type query --nodes 'NODE1' 'NODE2'
 ```
 
-Replace `ORIGINAL_QUESTION` with the user's verbatim question, `ANSWER` with your full answer text (containing the expanded-token trace), `NODE1 NODE2` with the list of node labels you cited. This closes the feedback loop: the next `--update` will extract this Q&A as a node in the graph.
+Each value goes through a **quoted** heredoc, whose body the shell never expands, and then from the file into the command — never type a question, answer or concept name inside quotes on the command line. Put each node label in single quotes, and leave out any label that itself contains a single quote.
 
-**Work memory (self-improving loop).** Add an `--outcome` so future sessions learn from this one — append `--outcome useful|dead_end|corrected` to the `save-result` command (and `--correction "the right answer"` when correcting):
+Replace `ORIGINAL_QUESTION` with the user's verbatim question and `ANSWER` with your full answer text (containing the expanded-token trace), both in the heredoc bodies, and `'NODE1' 'NODE2'` with the node labels you cited. This closes the feedback loop: the next `--update` will extract this Q&A as a node in the graph.
+
+**Work memory (self-improving loop).** Add an `--outcome` so future sessions learn from this one — append `--outcome useful|dead_end|corrected` to the `save-result` command (and, when correcting, `--correction="$(cat graphify-out/.graphify_correction.txt)"` after writing the right answer to that file with a quoted heredoc, the same way as the answer):
 
 - `useful` — the cited nodes answered the question well (they become *preferred sources*).
 - `dead_end` — the question/path led nowhere; don't re-derive it next time.
@@ -194,7 +208,13 @@ At the **start** of graph work, refresh and read the lessons: run `graphify refl
 Find the shortest path between two named concepts in the graph. Prefer the CLI when installed:
 
 ```bash
-graphify path "NODE_A" "NODE_B"
+cat > graphify-out/.graphify_node_a.txt <<'GRAPHIFY_NODE_EOF'
+NODE_A
+GRAPHIFY_NODE_EOF
+cat > graphify-out/.graphify_node_b.txt <<'GRAPHIFY_NODE_EOF'
+NODE_B
+GRAPHIFY_NODE_EOF
+graphify path "$(cat graphify-out/.graphify_node_a.txt)" "$(cat graphify-out/.graphify_node_b.txt)"
 ```
 
 If the CLI is unavailable, run it inline:
@@ -209,8 +229,8 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
 G = json_graph.node_link_graph(data, edges='links')
 
-a_term = 'NODE_A'
-b_term = 'NODE_B'
+# Both terms come from the quoted heredoc after this block (NODE_A line, then NODE_B line).
+a_term, b_term = (sys.stdin.read().splitlines() + ['', ''])[:2]
 
 def find_node(term):
     term = term.lower()
@@ -244,15 +264,24 @@ except nx.NetworkXNoPath:
     print(f'No path found between {a_term!r} and {b_term!r}')
 except nx.NodeNotFound as e:
     print(f'Node not found: {e}')
-"
+" <<'GRAPHIFY_NODE_EOF'
+NODE_A
+NODE_B
+GRAPHIFY_NODE_EOF
 ```
 
-Replace `NODE_A` and `NODE_B` with the actual concept names from the user. Then explain the path in plain language - what each hop means, why it's significant.
+Replace `NODE_A` and `NODE_B` in the heredoc bodies (never in the code) with the actual concept names from the user. Then explain the path in plain language - what each hop means, why it's significant.
 
 After writing the explanation, save it back:
 
 ```bash
-$(cat graphify-out/.graphify_python) -m graphify save-result --question "Path from NODE_A to NODE_B" --answer "ANSWER" --type path_query --nodes NODE_A NODE_B
+cat > graphify-out/.graphify_question.txt <<'GRAPHIFY_QUESTION_EOF'
+Path from NODE_A to NODE_B
+GRAPHIFY_QUESTION_EOF
+cat > graphify-out/.graphify_answer.txt <<'GRAPHIFY_ANSWER_EOF'
+ANSWER
+GRAPHIFY_ANSWER_EOF
+$(cat graphify-out/.graphify_python) -m graphify save-result --question="$(cat graphify-out/.graphify_question.txt)" --answer-file graphify-out/.graphify_answer.txt --type path_query --nodes 'NODE_A' 'NODE_B'
 ```
 
 ---
@@ -262,7 +291,10 @@ $(cat graphify-out/.graphify_python) -m graphify save-result --question "Path fr
 Give a plain-language explanation of a single node - everything connected to it. Prefer the CLI when installed:
 
 ```bash
-graphify explain "NODE_NAME"
+cat > graphify-out/.graphify_node.txt <<'GRAPHIFY_NODE_EOF'
+NODE_NAME
+GRAPHIFY_NODE_EOF
+graphify explain "$(cat graphify-out/.graphify_node.txt)"
 ```
 
 If the CLI is unavailable, run it inline:
@@ -277,7 +309,7 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
 G = json_graph.node_link_graph(data, edges='links')
 
-term = 'NODE_NAME'
+term = sys.stdin.read().strip()  # from the quoted heredoc after this block; never inline the text here
 term_lower = term.lower()
 
 # Find best matching node
@@ -305,13 +337,21 @@ for neighbor in G.neighbors(nid):
     conf = edge.get('confidence', '')
     src_file = G.nodes[neighbor].get('source_file', '')
     print(f'  --{rel}--> {nlabel} [{conf}] ({src_file})')
-"
+" <<'GRAPHIFY_NODE_EOF'
+NODE_NAME
+GRAPHIFY_NODE_EOF
 ```
 
-Replace `NODE_NAME` with the concept the user asked about. Then write a 3-5 sentence explanation of what this node is, what it connects to, and why those connections are significant. Use the source locations as citations.
+Replace `NODE_NAME` in the heredoc body (never in the code) with the concept the user asked about. Then write a 3-5 sentence explanation of what this node is, what it connects to, and why those connections are significant. Use the source locations as citations.
 
 After writing the explanation, save it back:
 
 ```bash
-$(cat graphify-out/.graphify_python) -m graphify save-result --question "Explain NODE_NAME" --answer "ANSWER" --type explain --nodes NODE_NAME
+cat > graphify-out/.graphify_question.txt <<'GRAPHIFY_QUESTION_EOF'
+Explain NODE_NAME
+GRAPHIFY_QUESTION_EOF
+cat > graphify-out/.graphify_answer.txt <<'GRAPHIFY_ANSWER_EOF'
+ANSWER
+GRAPHIFY_ANSWER_EOF
+$(cat graphify-out/.graphify_python) -m graphify save-result --question="$(cat graphify-out/.graphify_question.txt)" --answer-file graphify-out/.graphify_answer.txt --type explain --nodes 'NODE_NAME'
 ```

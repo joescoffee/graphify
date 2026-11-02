@@ -47,7 +47,24 @@ if [ -z "$GRAPHIFY_PYTHON" ]; then
         case "$_FROM_FILE" in
             *[!a-zA-Z0-9/_.@:\\\\-]*) _FROM_FILE="" ;;  # allowlist (covers Windows paths)
         esac
-        if [ -n "$_FROM_FILE" ] && [ -x "$_FROM_FILE" ] && "$_FROM_FILE" -c "$_GFY_PROBE" 2>/dev/null; then
+        # Security: the file can be committed by a cloned repo, so only accept an
+        # ABSOLUTE path with no '..' segments that lies OUTSIDE the repository
+        # root (git runs hooks from the worktree top). Otherwise a repo could
+        # ship graphify-out/.graphify_python pointing at its own script and get
+        # it executed on every commit/checkout.
+        case "$_FROM_FILE" in
+            /*|[A-Za-z]:*) ;;
+            *) _FROM_FILE="" ;;
+        esac
+        case "$_FROM_FILE" in
+            */../*|*/..|*\\\\..\\\\*|*\\\\..) _FROM_FILE="" ;;
+        esac
+        _GFY_ROOT_L=$(pwd -L 2>/dev/null)
+        _GFY_ROOT_P=$(pwd -P 2>/dev/null)
+        case "$_FROM_FILE" in
+            "$_GFY_ROOT_L"/*|"$_GFY_ROOT_P"/*) _FROM_FILE="" ;;
+        esac
+        if [ -n "$_FROM_FILE" ] && [ -f "$_FROM_FILE" ] && [ -x "$_FROM_FILE" ] && "$_FROM_FILE" -c "$_GFY_PROBE" 2>/dev/null; then
             GRAPHIFY_PYTHON="$_FROM_FILE"
         fi
     fi

@@ -1,7 +1,3 @@
-When `graphify-out/graph.json` already exists and the user asks a question about the corpus, answer from the graph rather than rebuilding it:
-
-```bash
-graphify query "<question>"
-```
+When `graphify-out/graph.json` already exists and the user asks a question about the corpus, answer from the graph rather than rebuilding it with `graphify query`. Never type the question inside quotes on the command line — `$(...)`, backticks or a stray quote in it would run as shell code. Write it to `graphify-out/.graphify_question.txt` through a quoted heredoc and pass it from there, exactly as `references/query.md` Step 1 shows.
 
 Before traversal, expand the question against the graph's own vocabulary so a wording mismatch does not collapse the answer to noise. If the `graphify query` CLI is unavailable, fall back to an inline NetworkX traversal of `graphify-out/graph.json`. Answer using only what the graph output contains, and quote `source_location` when citing a specific fact. For that vocab-expansion step, the BFS/DFS traversal modes, the `--budget` cap, the NetworkX fallback, `save-result` feedback, and the `/graphify path` and `/graphify explain` flows, see `references/query.md`.
