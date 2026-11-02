@@ -115,7 +115,7 @@ $GRAPHIFY_PYTHON = Find-GraphifyPython
 if (-not $GRAPHIFY_PYTHON) {
     Write-Host "graphify is not installed. Nothing was installed automatically."
     Write-Host "Install a pinned version yourself, then re-run /graphify, e.g.:"
-    Write-Host "    uv tool install graphifyy==0.9.100    # or: pipx install graphifyy==0.9.100"
+    Write-Host "    uv tool install graphifyy==<version>    # or: pipx install graphifyy==<version>"
     exit 1
 }
 
@@ -140,7 +140,7 @@ INPUT_PATH
 [System.IO.File]::WriteAllText((Join-Path $PWD 'graphify-out\.graphify_input'), $InputPathRaw.Trim(), $Utf8NoBom)
 ```
 
-If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==0.9.100`) and do not install or upgrade graphify yourself.
+If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==<version>`, pinning a release they have reviewed) and do not install or upgrade graphify yourself.
 
 **In every subsequent block, run Python through the saved interpreter — `& (Get-Content graphify-out\.graphify_python)` in place of a bare `python3` — so every step uses the interpreter that actually has graphify.**
 
@@ -325,9 +325,7 @@ $PROJECT_ROOT = (Get-Location).Path  # cwd — where Part C globs graphify-out\ 
 
 Subagent prompt template:
 
-See `references/extraction-spec.md` for the exact subagent prompt (JSON schema, node-ID rules, confidence rubric, frontmatter, hyperedge, and vision rules). Load it only here, only when at least one chunk holds a doc, paper, or image; a pure-code corpus has skipped Part B and never reads it. Pass each subagent that prompt verbatim with FILE_LIST, CHUNK_NUM, TOTAL_CHUNKS, and DEEP_MODE substituted and CHUNK_PATH set to `RETURN`.
-
-When each subagent returns, write its final message — the JSON object only, with the real `input_tokens`/`output_tokens` from the Agent tool result's `usage` field filled in — to that chunk's CHUNK_PATH with your own Write tool. Never pass the returned text through a shell command (no `echo` or heredoc of it): it is derived from untrusted files. If the message is not a JSON object, write nothing for that chunk and count it as failed in Step B3, whose merge validates every chunk file with graphify's semantic-fragment validator before using it.
+See `references/extraction-spec.md` for the exact subagent prompt (JSON schema, node-ID rules, confidence rubric, frontmatter, hyperedge, and vision rules). Load it only here, only when at least one chunk holds a doc, paper, or image; a pure-code corpus has skipped Part B and never reads it. Pass each subagent that prompt verbatim with FILE_LIST, CHUNK_NUM, TOTAL_CHUNKS, and DEEP_MODE substituted and CHUNK_PATH set to `RETURN`. When each subagent returns, write its final message — the JSON object only, with the real `input_tokens`/`output_tokens` from the Agent tool result's `usage` field filled in — to that chunk's CHUNK_PATH with your own Write tool. Never pass the returned text through a shell command (no `echo` or heredoc of it): it is derived from untrusted files. If the message is not a JSON object, write nothing for that chunk and count it as failed in Step B3, whose merge validates every chunk file with graphify's semantic-fragment validator before using it.
 
 **Step B3 - Collect, cache, and merge**
 
@@ -352,8 +350,7 @@ covered = {}
 from graphify.semantic_cleanup import load_validated_semantic_fragment
 for c in sorted(glob.glob('graphify-out/.graphify_chunk_*.json')):
     d, errors = load_validated_semantic_fragment(Path(c))  # untrusted chunk: validate, skip bad
-    if errors:
-        continue
+    if errors: continue
     for src, n in (d.get('coverage') or {}).items():
         covered[src] = max(covered.get(src, 0), int(n))
 
@@ -387,13 +384,11 @@ import json, glob
 from pathlib import Path
 
 from graphify.semantic_cleanup import load_validated_semantic_fragment
-
 chunks = sorted(glob.glob('graphify-out/.graphify_chunk_*.json'))
 all_nodes, all_edges, all_hyperedges = [], [], []
 total_in, total_out = 0, 0
 for c in chunks:
-    # Chunk files hold model output derived from untrusted files: validate them
-    # (size cap, schema, id charset) instead of a raw json.loads; skip bad ones.
+    # Untrusted model output: validate (size cap, schema, id charset), skip bad chunks.
     d, errors = load_validated_semantic_fragment(Path(c))
     if errors:
         print(f'Skipping invalid chunk {c}: ' + '; '.join(errors[:3]))

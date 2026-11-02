@@ -26,7 +26,11 @@ def _python_blocks(body: str, start: str, end: str) -> list[str]:
 
 
 def _run(source: str, *, cwd: Path, corpus: Path, spec: Path) -> None:
-    source = source.replace("INPUT_PATH", corpus.as_posix()).replace("SPEC_PATH", spec.as_posix())
+    # The skill no longer substitutes the scan path into Python source: Step 1
+    # writes it to graphify-out/.graphify_input via a quoted heredoc (security).
+    (cwd / "graphify-out").mkdir(exist_ok=True)
+    (cwd / "graphify-out" / ".graphify_input").write_text(corpus.as_posix(), encoding="utf-8")
+    source = source.replace("SPEC_PATH", spec.as_posix())
     subprocess.run([sys.executable, "-c", source], cwd=cwd, check=True,
                    capture_output=True, text=True)
 

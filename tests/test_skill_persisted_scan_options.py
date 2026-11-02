@@ -12,11 +12,17 @@ from graphify.detect import detect, save_manifest
 from graphify.watch import _write_build_config, _read_build_excludes, _read_build_gitignore
 
 
+# The skill never substitutes the scan path into Python source; Step 1 (or the
+# --update runbook) writes it to graphify-out/.graphify_input via a quoted
+# heredoc and every block reads it from there.
+_INPUT = "Path('graphify-out/.graphify_input').read_text(encoding='utf-8')"
+
+
 def _scan_blocks():
     found = []
     for art in gen.render_all(gen.load_platforms()):
         for block in re.findall(r'```bash\n(.*?)```', art.content, re.S):
-            if "result = detect(Path('INPUT_PATH')" not in block and "result = detect_incremental(Path('INPUT_PATH')" not in block:
+            if f"result = detect(Path({_INPUT})" not in block and f"result = detect_incremental(Path({_INPUT})" not in block:
                 continue
             m = re.search(r' -c "\n(.*)\n"', block, re.S)
             if m:
@@ -47,7 +53,7 @@ def test_skill_scan_honors_persisted_options(tmp_path, monkeypatch, art, source)
     # Only exercise the scan contract, not subsequent sidecar/report steps.
     src = source.split('result = ', 1)[0] + 'result = ' + source.split('result = ', 1)[1].split('\n', 1)[0]
     src += '\nprint(json.dumps(result))\n'
-    src = src.replace('INPUT_PATH', corpus.as_posix())
+    (out / '.graphify_input').write_text(corpus.as_posix(), encoding='utf-8')
     result = subprocess.run([sys.executable, '-c', src], cwd=tmp_path, check=True, capture_output=True, text=True)
     data = json.loads(result.stdout)
     actual = {Path(f).relative_to(corpus).as_posix() for files in data['files'].values() for f in files}

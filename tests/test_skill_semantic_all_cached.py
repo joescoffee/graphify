@@ -83,8 +83,11 @@ def test_all_cached_run_reaches_part_c_with_cached_nodes_and_no_stale_chunks(tmp
         json.dumps({"nodes": [{"id": "stale_node", "label": "old", "source_file": "x.md"}],
                     "edges": []}), encoding="utf-8")
 
+    # The skill no longer substitutes the scan path into Python source: Step 1
+    # writes it to graphify-out/.graphify_input via a quoted heredoc (security).
+    (out / ".graphify_input").write_text(corpus.as_posix(), encoding="utf-8")
     for src in b0 + b3 + part_c:
-        src = src.replace("INPUT_PATH", corpus.as_posix()).replace("SPEC_PATH", spec.as_posix())
+        src = src.replace("SPEC_PATH", spec.as_posix())
         subprocess.run([sys.executable, "-c", src], cwd=tmp_path, check=True,
                        capture_output=True, text=True)
 

@@ -45,7 +45,7 @@ $GRAPHIFY_PYTHON = Find-GraphifyPython
 if (-not $GRAPHIFY_PYTHON) {
     Write-Host "graphify is not installed. Nothing was installed automatically."
     Write-Host "Install a pinned version yourself, then re-run /graphify, e.g.:"
-    Write-Host "    uv tool install graphifyy==0.9.100    # or: pipx install graphifyy==0.9.100"
+    Write-Host "    uv tool install graphifyy==<version>    # or: pipx install graphifyy==<version>"
     exit 1
 }
 
@@ -70,6 +70,6 @@ INPUT_PATH
 [System.IO.File]::WriteAllText((Join-Path $PWD 'graphify-out\.graphify_input'), $InputPathRaw.Trim(), $Utf8NoBom)
 ```
 
-If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==0.9.100`) and do not install or upgrade graphify yourself.
+If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==<version>`, pinning a release they have reviewed) and do not install or upgrade graphify yourself.
 
 **In every subsequent block, run Python through the saved interpreter — `& (Get-Content graphify-out\.graphify_python)` in place of a bare `python3` — so every step uses the interpreter that actually has graphify.**

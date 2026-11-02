@@ -249,8 +249,7 @@ covered = {}
 from graphify.semantic_cleanup import load_validated_semantic_fragment
 for c in sorted(glob.glob('graphify-out/.graphify_chunk_*.json')):
     d, errors = load_validated_semantic_fragment(Path(c))  # untrusted chunk: validate, skip bad
-    if errors:
-        continue
+    if errors: continue
     for src, n in (d.get('coverage') or {}).items():
         covered[src] = max(covered.get(src, 0), int(n))
 
@@ -284,13 +283,11 @@ import json, glob
 from pathlib import Path
 
 from graphify.semantic_cleanup import load_validated_semantic_fragment
-
 chunks = sorted(glob.glob('graphify-out/.graphify_chunk_*.json'))
 all_nodes, all_edges, all_hyperedges = [], [], []
 total_in, total_out = 0, 0
 for c in chunks:
-    # Chunk files hold model output derived from untrusted files: validate them
-    # (size cap, schema, id charset) instead of a raw json.loads; skip bad ones.
+    # Untrusted model output: validate (size cap, schema, id charset), skip bad chunks.
     d, errors = load_validated_semantic_fragment(Path(c))
     if errors:
         print(f'Skipping invalid chunk {c}: ' + '; '.join(errors[:3]))

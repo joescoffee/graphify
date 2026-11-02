@@ -40,7 +40,11 @@ def _section(body: str, start: str, end: str) -> str:
 
 
 def _run_code(script: str, *, cwd: Path, root: Path) -> subprocess.CompletedProcess[str]:
-    script = script.replace("INPUT_PATH", root.as_posix()).replace("IS_DIRECTED", "False")
+    # The skill no longer substitutes the scan path into Python source: Step 1
+    # writes it to graphify-out/.graphify_input via a quoted heredoc (security).
+    (cwd / "graphify-out").mkdir(exist_ok=True)
+    (cwd / "graphify-out" / ".graphify_input").write_text(root.as_posix(), encoding="utf-8")
+    script = script.replace("IS_DIRECTED", "False")
     env = {
         **os.environ,
         "GRAPHIFY_OUT": "graphify-out",

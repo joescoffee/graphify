@@ -24,6 +24,9 @@ from graphify.extract import extract  # noqa: E402
 from tools.skillgen import gen  # noqa: E402
 
 _CALL = "extract(code_files, cache_root="
+# The scan path is read from the sidecar Step 1 writes via a quoted heredoc; it is
+# never substituted into the Python source (security review 2026-11-02).
+_SCAN = "Path(Path('graphify-out/.graphify_input').read_text(encoding='utf-8'))"
 
 
 def _split_hosts() -> list[gen.Platform]:
@@ -45,7 +48,7 @@ def test_part_a_passes_an_explicit_root(platform: gen.Platform):
     calls = _part_a_calls(platform)
     assert calls, f"[{platform.key}] Part A extract() call not found"
     for call in calls:
-        assert "root=Path('INPUT_PATH')" in call.replace("cache_root=Path('INPUT_PATH')", ""), (
+        assert f"root={_SCAN}" in call.replace(f"cache_root={_SCAN}", ""), (
             f"[{platform.key}] Part A calls extract() with cache_root but no root= (#3727): {call!r}"
         )
 
@@ -61,10 +64,10 @@ def test_relocating_only_the_cache_does_not_rename_part_a_nodes(tmp_path: Path):
 
     (call,) = _part_a_calls(gen.load_platforms()["claude"])
     expression = call.removeprefix("result = ")
-    in_place = expression.replace("Path('INPUT_PATH')", f"Path({str(scan_root)!r})")
+    in_place = expression.replace(_SCAN, f"Path({str(scan_root)!r})")
     relocated = expression.replace(
-        "cache_root=Path('INPUT_PATH')", f"cache_root=Path({str(elsewhere)!r})"
-    ).replace("Path('INPUT_PATH')", f"Path({str(scan_root)!r})")
+        f"cache_root={_SCAN}", f"cache_root=Path({str(elsewhere)!r})"
+    ).replace(_SCAN, f"Path({str(scan_root)!r})")
     assert in_place != relocated
 
     scope = {"extract": extract, "Path": Path, "code_files": [module]}

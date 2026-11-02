@@ -49,7 +49,9 @@ def _run_fallback(
     # The payload is embedded in a double-quoted shell argument. Unescape the
     # quotes that the shell would remove before compiling its Python body.
     script = script.replace(chr(92) + '"', '"')
-    script = script.replace("question = 'QUESTION'", f"question = {question!r}")
+    # The question is never inlined into the Python source (shell/Python
+    # injection); the skill writes it to this file through a quoted heredoc.
+    (output_dir / ".graphify_question.txt").write_text(question + "\n", encoding="utf-8")
     script = script.replace("mode = 'MODE'  # 'bfs' or 'dfs'", f"mode = {mode!r}")
     script = script.replace(
         "token_budget = BUDGET  # default 2000",

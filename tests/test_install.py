@@ -590,7 +590,11 @@ def test_claw_skill_uses_agent_tool_dispatch():
 
     skill = (Path(graphify.__file__).parent / "skill-claw.md").read_text()
     b2 = skill[skill.index("**Step B2"):skill.index("**Step B3")]
-    assert 'subagent_type="general-purpose"' in b2
+    # Security (2026-11-02): extraction subagents are read-only (no Bash/Write);
+    # the orchestrator writes each returned chunk.
+    assert "Agent tool" in b2
+    assert 'subagent_type="Explore"' in b2
+    assert "Do NOT use `general-purpose`" in b2
     assert "spawn_agent" not in skill
     assert "@mention" not in skill
 

@@ -69,11 +69,8 @@ Only when the path is one or more `https://github.com/...` URLs, or several loca
 ### Step 1 - Ensure graphify is installed
 
 ```bash
-# Detect the Python interpreter that already has graphify (uv tool, pipx, venv,
-# system installs). Security: this step never installs or upgrades anything and
-# never runs `uv tool run --from graphifyy` (that downloads the latest release
-# from PyPI unattended). If graphify is not importable, stop and let the user
-# install a pinned version themselves.
+# Detect the Python interpreter that already has graphify (uv tool, pipx, venv, system).
+# Security: never installs or upgrades anything (no unattended PyPI downloads).
 PYTHON=""
 GRAPHIFY_BIN=$(which graphify 2>/dev/null)
 # 1. Read shebang from the graphify launcher (uv tool, pipx and pip installs)
@@ -87,9 +84,8 @@ fi
 # 2. Fall back to python3
 if [ -z "$PYTHON" ]; then PYTHON="python3"; fi
 if ! "$PYTHON" -c "import graphify" 2>/dev/null; then
-    echo "graphify is not installed for $PYTHON. Nothing was installed automatically."
-    echo "Install a pinned version yourself, then re-run /graphify, e.g.:"
-    echo "    uv tool install graphifyy==0.9.100    # or: pipx install graphifyy==0.9.100"
+    echo "graphify is not installed for $PYTHON; nothing was installed automatically."
+    echo "Install a pinned version yourself, e.g. uv tool install graphifyy==<version>, then re-run /graphify."
     exit 1
 fi
 # Write interpreter path for all subsequent steps (persists across invocations)
@@ -99,15 +95,14 @@ mkdir -p graphify-out
 # The scan path is passed through a quoted heredoc, never substituted into the
 # command line itself: a bare `cd <path>` (or an unquoted heredoc, which
 # still expands $()/backticks in its body) would let a malicious path execute
-# as shell code the moment this line runs. The raw path is also saved to
-# graphify-out/.graphify_input, and every later Python block reads it from
-# there, so it is never substituted into Python source either.
+# as shell code the moment this line runs. The raw path also goes to
+# graphify-out/.graphify_input, which later Python blocks read instead of a literal.
 "$PYTHON" -c "import os, sys; raw = sys.stdin.readline().rstrip('\n'); open('graphify-out/.graphify_input', 'w', encoding='utf-8').write(raw); out_path = os.path.abspath('graphify-out/.graphify_root'); os.chdir(raw); open(out_path, 'w', encoding='utf-8').write(os.getcwd())" <<'GRAPHIFY_ROOT_EOF'
 INPUT_PATH
 GRAPHIFY_ROOT_EOF
 ```
 
-If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==0.9.100`) and do not install or upgrade graphify yourself.
+If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==<version>`, pinning a release they have reviewed) and do not install or upgrade graphify yourself.
 
 **In every subsequent bash block, replace `python3` with `$(cat graphify-out/.graphify_python)` to use the correct interpreter.** Step 1 rewrites that file on every run from the interpreter it just verified; never use a copy that arrived with a cloned repository without running Step 1 (or the interpreter guard below) first.
 
@@ -309,8 +304,7 @@ covered = {}
 from graphify.semantic_cleanup import load_validated_semantic_fragment
 for c in sorted(glob.glob('graphify-out/.graphify_chunk_*.json')):
     d, errors = load_validated_semantic_fragment(Path(c))  # untrusted chunk: validate, skip bad
-    if errors:
-        continue
+    if errors: continue
     for src, n in (d.get('coverage') or {}).items():
         covered[src] = max(covered.get(src, 0), int(n))
 
@@ -344,13 +338,11 @@ import json, glob
 from pathlib import Path
 
 from graphify.semantic_cleanup import load_validated_semantic_fragment
-
 chunks = sorted(glob.glob('graphify-out/.graphify_chunk_*.json'))
 all_nodes, all_edges, all_hyperedges = [], [], []
 total_in, total_out = 0, 0
 for c in chunks:
-    # Chunk files hold model output derived from untrusted files: validate them
-    # (size cap, schema, id charset) instead of a raw json.loads; skip bad ones.
+    # Untrusted model output: validate (size cap, schema, id charset), skip bad chunks.
     d, errors = load_validated_semantic_fragment(Path(c))
     if errors:
         print(f'Skipping invalid chunk {c}: ' + '; '.join(errors[:3]))
@@ -744,15 +736,9 @@ The graph is the map. Your job after the pipeline is to be the guide.
 Before running any subcommand below (`--update`, `--cluster-only`, `query`, `path`, `explain`, `add`), check that `.graphify_python` exists and names a trusted interpreter. If it's missing (e.g. user deleted `graphify-out/`) or fails the check below, re-resolve the interpreter first:
 
 ```bash
-# Security: graphify-out/ may come from a cloned repo, so never run a recorded
-# interpreter blindly. Keep it only if it is an absolute path outside this
-# directory (no '..') to an executable that imports graphify; else re-detect.
+# Security: graphify-out/ may come from a cloned repo; trust only an absolute path outside it.
 _GFY_PY=$(cat graphify-out/.graphify_python 2>/dev/null | tr -d '[:space:]')
-case "$_GFY_PY" in
-    *[!a-zA-Z0-9/_.@-]*|*/../*|"$(pwd -P)"/*|"$(pwd)"/*) _GFY_PY="" ;;
-    /*) ;;
-    *) _GFY_PY="" ;;
-esac
+case "$_GFY_PY" in *[!a-zA-Z0-9/_.@-]*|*/../*|"$(pwd -P)"/*|"$(pwd)"/*) _GFY_PY="" ;; /*) ;; *) _GFY_PY="" ;; esac
 if [ -n "$_GFY_PY" ] && { [ ! -f "$_GFY_PY" ] || [ ! -x "$_GFY_PY" ] || ! "$_GFY_PY" -c "import graphify" 2>/dev/null; }; then _GFY_PY=""; fi
 if [ -z "$_GFY_PY" ]; then
     GRAPHIFY_BIN=$(which graphify 2>/dev/null)

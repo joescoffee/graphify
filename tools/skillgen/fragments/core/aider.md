@@ -63,11 +63,8 @@ Follow these steps in order unless the fast path above applies.
 ### Step 1 - Ensure graphify is installed
 
 ```bash
-# Detect the Python interpreter that already has graphify (uv tool, pipx, venv,
-# system installs). Security: this step never installs or upgrades anything and
-# never runs `uv tool run --from graphifyy` (that downloads the latest release
-# from PyPI unattended). If graphify is not importable, stop and let the user
-# install a pinned version themselves.
+# Detect the Python interpreter that already has graphify (uv tool, pipx, venv, system).
+# Security: never installs or upgrades anything (no unattended PyPI downloads).
 PYTHON=""
 GRAPHIFY_BIN=$(which graphify 2>/dev/null)
 # 1. Read shebang from the graphify launcher (uv tool, pipx and pip installs)
@@ -81,9 +78,8 @@ fi
 # 2. Fall back to python3
 if [ -z "$PYTHON" ]; then PYTHON="python3"; fi
 if ! "$PYTHON" -c "import graphify" 2>/dev/null; then
-    echo "graphify is not installed for $PYTHON. Nothing was installed automatically."
-    echo "Install a pinned version yourself, then re-run /graphify, e.g.:"
-    echo "    uv tool install graphifyy==0.9.100    # or: pipx install graphifyy==0.9.100"
+    echo "graphify is not installed for $PYTHON; nothing was installed automatically."
+    echo "Install a pinned version yourself, e.g. uv tool install graphifyy==<version>, then re-run /graphify."
     exit 1
 fi
 # Write interpreter path for all subsequent steps (persists across invocations)
@@ -93,15 +89,14 @@ mkdir -p graphify-out
 # The scan path is passed through a quoted heredoc, never substituted into the
 # command line itself: a bare `cd <path>` (or an unquoted heredoc, which
 # still expands $()/backticks in its body) would let a malicious path execute
-# as shell code the moment this line runs. The raw path is also saved to
-# graphify-out/.graphify_input, and every later Python block reads it from
-# there, so it is never substituted into Python source either.
+# as shell code the moment this line runs. The raw path also goes to
+# graphify-out/.graphify_input, which later Python blocks read instead of a literal.
 "$PYTHON" -c "import os, sys; raw = sys.stdin.readline().rstrip('\n'); open('graphify-out/.graphify_input', 'w', encoding='utf-8').write(raw); out_path = os.path.abspath('graphify-out/.graphify_root'); os.chdir(raw); open(out_path, 'w', encoding='utf-8').write(os.getcwd())" <<'GRAPHIFY_ROOT_EOF'
 INPUT_PATH
 GRAPHIFY_ROOT_EOF
 ```
 
-If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==0.9.100`) and do not install or upgrade graphify yourself.
+If the import succeeds, print nothing and move straight to Step 2. If it fails, stop: tell the user to install a pinned version themselves (for example `uv tool install graphifyy==<version>`, pinning a release they have reviewed) and do not install or upgrade graphify yourself.
 
 **In every subsequent bash block, replace `python3` with `$(cat graphify-out/.graphify_python)` to use the correct interpreter.** Step 1 rewrites that file on every run from the interpreter it just verified; never use a copy that arrived with a cloned repository without running Step 1 (or the interpreter guard below) first.
 
@@ -1012,6 +1007,9 @@ Load `graphify-out/graph.json`, then:
 5. If the graph lacks enough information, say so - do not hallucinate edges.
 
 ```bash
+cat > graphify-out/.graphify_question.txt <<'GRAPHIFY_QUESTION_EOF'
+QUESTION
+GRAPHIFY_QUESTION_EOF
 $(cat graphify-out/.graphify_python) -c "
 import sys, json
 from networkx.readwrite import json_graph
@@ -1021,7 +1019,7 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text())
 G = json_graph.node_link_graph(data, edges='links')
 
-question = sys.stdin.read().strip()  # from the quoted heredoc after this block; never inline the text here
+question = Path('graphify-out/.graphify_question.txt').read_text(encoding='utf-8').strip()  # written by the quoted heredoc above; never inline the text here
 mode = 'MODE'  # 'bfs' or 'dfs'
 terms = [t.lower() for t in question.split() if len(t) > 3]
 
@@ -1095,9 +1093,7 @@ output = '\n'.join(lines)
 if len(output) > char_budget:
     output = output[:char_budget] + f'\n... (truncated at ~{token_budget} token budget - use --budget N for more)'
 print(output)
-" <<'GRAPHIFY_QUESTION_EOF'
-QUESTION
-GRAPHIFY_QUESTION_EOF
+"
 ```
 
 Replace `QUESTION` in the heredoc body (never in the code) with the user's actual question, `MODE` with `bfs` or `dfs`, and `BUDGET` with the token budget (default `2000`, or whatever `--budget N` specifies). Then answer based on the subgraph output above.
@@ -1136,6 +1132,12 @@ if not Path('graphify-out/graph.json').exists():
 If it fails, stop and tell the user to run `/graphify <path>` first.
 
 ```bash
+cat > graphify-out/.graphify_node_a.txt <<'GRAPHIFY_NODE_EOF'
+NODE_A
+GRAPHIFY_NODE_EOF
+cat > graphify-out/.graphify_node_b.txt <<'GRAPHIFY_NODE_EOF'
+NODE_B
+GRAPHIFY_NODE_EOF
 $(cat graphify-out/.graphify_python) -c "
 import json, sys
 import networkx as nx
@@ -1145,8 +1147,9 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text())
 G = json_graph.node_link_graph(data, edges='links')
 
-# Both terms come from the quoted heredoc after this block (NODE_A line, then NODE_B line).
-a_term, b_term = (sys.stdin.read().splitlines() + ['', ''])[:2]
+# Both terms come from the files the quoted heredocs above wrote; never inline them here.
+a_term = Path('graphify-out/.graphify_node_a.txt').read_text(encoding='utf-8').strip()
+b_term = Path('graphify-out/.graphify_node_b.txt').read_text(encoding='utf-8').strip()
 
 def find_node(term):
     term = term.lower()
@@ -1180,10 +1183,7 @@ except nx.NetworkXNoPath:
     print(f'No path found between {a_term!r} and {b_term!r}')
 except nx.NodeNotFound as e:
     print(f'Node not found: {e}')
-" <<'GRAPHIFY_NODE_EOF'
-NODE_A
-NODE_B
-GRAPHIFY_NODE_EOF
+"
 ```
 
 Replace `NODE_A` and `NODE_B` in the heredoc bodies (never in the code) with the actual concept names from the user. Then explain the path in plain language - what each hop means, why it's significant.
@@ -1218,6 +1218,9 @@ if not Path('graphify-out/graph.json').exists():
 If it fails, stop and tell the user to run `/graphify <path>` first.
 
 ```bash
+cat > graphify-out/.graphify_node.txt <<'GRAPHIFY_NODE_EOF'
+NODE_NAME
+GRAPHIFY_NODE_EOF
 $(cat graphify-out/.graphify_python) -c "
 import json, sys
 import networkx as nx
@@ -1227,7 +1230,7 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text())
 G = json_graph.node_link_graph(data, edges='links')
 
-term = sys.stdin.read().strip()  # from the quoted heredoc after this block; never inline the text here
+term = Path('graphify-out/.graphify_node.txt').read_text(encoding='utf-8').strip()  # written by the quoted heredoc above; never inline the text here
 term_lower = term.lower()
 
 # Find best matching node
@@ -1255,9 +1258,7 @@ for neighbor in G.neighbors(nid):
     conf = edge.get('confidence', '')
     src_file = G.nodes[neighbor].get('source_file', '')
     print(f'  --{rel}--> {nlabel} [{conf}] ({src_file})')
-" <<'GRAPHIFY_NODE_EOF'
-NODE_NAME
-GRAPHIFY_NODE_EOF
+"
 ```
 
 Replace `NODE_NAME` in the heredoc body (never in the code) with the concept the user asked about. Then write a 3-5 sentence explanation of what this node is, what it connects to, and why those connections are significant. Use the source locations as citations.

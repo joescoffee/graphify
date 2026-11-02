@@ -81,6 +81,9 @@ If the CLI is unavailable, load `graphify-out/graph.json` and run the traversal 
 5. If the graph lacks enough information, say so - do not hallucinate edges.
 
 ```bash
+cat > graphify-out/.graphify_question.txt <<'GRAPHIFY_QUESTION_EOF'
+QUESTION
+GRAPHIFY_QUESTION_EOF
 $(cat graphify-out/.graphify_python) -c "
 import sys, json
 from networkx.readwrite import json_graph
@@ -89,7 +92,7 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
 G = json_graph.node_link_graph(data, edges='links')
 
-question = sys.stdin.read().strip()  # from the quoted heredoc after this block; never inline the text here
+question = Path('graphify-out/.graphify_question.txt').read_text(encoding='utf-8').strip()  # written by the quoted heredoc above; never inline the text here
 mode = 'MODE'  # 'bfs' or 'dfs'
 terms = [t.lower() for t in question.split() if len(t) >= 3]  # match the vocab threshold; keeps api/jwt/ios (#1392)
 
@@ -170,9 +173,7 @@ output = '\n'.join(lines)
 if len(output) > char_budget:
     output = output[:char_budget] + f'\n... (truncated at ~{token_budget} token budget - use --budget N for more)'
 print(output)
-" <<'GRAPHIFY_QUESTION_EOF'
-QUESTION
-GRAPHIFY_QUESTION_EOF
+"
 ```
 
 Replace `QUESTION` in the heredoc body (never in the code) with the **expanded** query string, `MODE` with `bfs` or `dfs`, and `BUDGET` with the token budget (default `2000`, or whatever `--budget N` specifies). Then answer based on the subgraph output above, using only what the graph contains.
@@ -220,6 +221,12 @@ graphify path "$(cat graphify-out/.graphify_node_a.txt)" "$(cat graphify-out/.gr
 If the CLI is unavailable, run it inline:
 
 ```bash
+cat > graphify-out/.graphify_node_a.txt <<'GRAPHIFY_NODE_EOF'
+NODE_A
+GRAPHIFY_NODE_EOF
+cat > graphify-out/.graphify_node_b.txt <<'GRAPHIFY_NODE_EOF'
+NODE_B
+GRAPHIFY_NODE_EOF
 $(cat graphify-out/.graphify_python) -c "
 import json, sys
 import networkx as nx
@@ -229,8 +236,9 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
 G = json_graph.node_link_graph(data, edges='links')
 
-# Both terms come from the quoted heredoc after this block (NODE_A line, then NODE_B line).
-a_term, b_term = (sys.stdin.read().splitlines() + ['', ''])[:2]
+# Both terms come from the files the quoted heredocs above wrote; never inline them here.
+a_term = Path('graphify-out/.graphify_node_a.txt').read_text(encoding='utf-8').strip()
+b_term = Path('graphify-out/.graphify_node_b.txt').read_text(encoding='utf-8').strip()
 
 def find_node(term):
     term = term.lower()
@@ -264,10 +272,7 @@ except nx.NetworkXNoPath:
     print(f'No path found between {a_term!r} and {b_term!r}')
 except nx.NodeNotFound as e:
     print(f'Node not found: {e}')
-" <<'GRAPHIFY_NODE_EOF'
-NODE_A
-NODE_B
-GRAPHIFY_NODE_EOF
+"
 ```
 
 Replace `NODE_A` and `NODE_B` in the heredoc bodies (never in the code) with the actual concept names from the user. Then explain the path in plain language - what each hop means, why it's significant.
@@ -300,6 +305,9 @@ graphify explain "$(cat graphify-out/.graphify_node.txt)"
 If the CLI is unavailable, run it inline:
 
 ```bash
+cat > graphify-out/.graphify_node.txt <<'GRAPHIFY_NODE_EOF'
+NODE_NAME
+GRAPHIFY_NODE_EOF
 $(cat graphify-out/.graphify_python) -c "
 import json, sys
 import networkx as nx
@@ -309,7 +317,7 @@ from pathlib import Path
 data = json.loads(Path('graphify-out/graph.json').read_text(encoding='utf-8'))
 G = json_graph.node_link_graph(data, edges='links')
 
-term = sys.stdin.read().strip()  # from the quoted heredoc after this block; never inline the text here
+term = Path('graphify-out/.graphify_node.txt').read_text(encoding='utf-8').strip()  # written by the quoted heredoc above; never inline the text here
 term_lower = term.lower()
 
 # Find best matching node
@@ -337,9 +345,7 @@ for neighbor in G.neighbors(nid):
     conf = edge.get('confidence', '')
     src_file = G.nodes[neighbor].get('source_file', '')
     print(f'  --{rel}--> {nlabel} [{conf}] ({src_file})')
-" <<'GRAPHIFY_NODE_EOF'
-NODE_NAME
-GRAPHIFY_NODE_EOF
+"
 ```
 
 Replace `NODE_NAME` in the heredoc body (never in the code) with the concept the user asked about. Then write a 3-5 sentence explanation of what this node is, what it connects to, and why those connections are significant. Use the source locations as citations.

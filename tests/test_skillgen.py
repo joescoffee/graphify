@@ -563,8 +563,10 @@ def test_pi_never_names_the_claude_general_purpose_agent():
     assert "Re-run with the `delegate` agent." in pi
     assert "ensure the `delegate` agent is used." in pi
     claude, _ = _platform_artifacts("claude")
-    assert "Re-run with general-purpose agent." in claude
-    assert 'ensure `subagent_type="general-purpose"` is used.' in claude
+    # Security (2026-11-02): claude's extraction subagents are read-only and the
+    # orchestrator writes the chunks, so its hints name that protocol instead.
+    assert "Re-run with the read-only dispatch from Step B2" in claude
+    assert "ensure the read-only dispatch from Step B2 (each returned chunk written to CHUNK_PATH by the orchestrator) is used." in claude
 
 
 def test_compact_extraction_hosts_use_the_compact_spec():
@@ -1179,10 +1181,13 @@ def _step_body(core: str, marker: str) -> str:
 
 
 def _substituted(body: str, root: Path) -> str:
-    """Apply the substitutions the skill tells the agent to make (INPUT_PATH/SPEC_PATH)."""
+    """Apply the substitutions the skill tells the agent to make (SPEC_PATH), and
+    stand in for the scan path Step 1 records in graphify-out/.graphify_input
+    (the skill never substitutes INPUT_PATH into Python source)."""
     spec = root / "extraction-spec.md"
     spec.write_text("extraction prompt fixture\n", encoding="utf-8")
-    return body.replace("'INPUT_PATH'", repr(str(root))).replace("'SPEC_PATH'", repr(str(spec)))
+    sidecar = "Path('graphify-out/.graphify_input').read_text(encoding='utf-8')"
+    return body.replace(sidecar, repr(str(root))).replace("'SPEC_PATH'", repr(str(spec)))
 
 
 def _write_chunk(out_dir: Path, payload: dict) -> None:
